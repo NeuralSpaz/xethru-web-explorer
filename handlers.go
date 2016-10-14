@@ -14,8 +14,6 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		file, _ = Asset("www/index.html")
 	}
-	// os.OpenFile("./index.html", flag, perm)
-	// file, _ := Asset("www/index.html")
 	w.Header().Set("Content-Type", "text/html")
 	w.Write(file)
 }
