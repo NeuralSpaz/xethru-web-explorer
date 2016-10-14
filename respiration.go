@@ -23,47 +23,59 @@ import (
 	"flag"
 	"log"
 	"net/http"
-	"os"
 	"os/exec"
 	"runtime"
-	"sync"
+	"strconv"
 	"time"
 
 	"github.com/NeuralSpaz/xethru"
 	"github.com/gorilla/websocket"
-	"github.com/jacobsa/go-serial/serial"
-	"github.com/mjibson/go-dsp/fft"
-	// "github.com/tarm/serial"
+	"github.com/tarm/serial"
 )
 
 func main() {
-	log.Println("X2M200 Respiration Demo")
+	log.Println("X2M200 Web Demo")
 
-	commPort := flag.String("commPort", "/dev/ttyACM0", "the comm port you wish to use")
-	baudrate := flag.Uint("baudrate", 115200, "the baud rate for the comm port you wish to use")
-	// pingTimeout := flag.Duration("pingTimeout", time.Millisecond*500, "timeout for ping command")
+	commPort := flag.String("com", "/dev/ttyACM0", "the comm port you wish to use")
+	baudrate := flag.Uint("baud", 115200, "the baud rate for the comm port you wish to use")
+	sensitivity := flag.Uint("sensitivity", 7, "the sensitivity")
+	start := flag.Float64("start", 0.5, "start of dectection zone")
+	end := flag.Float64("end", 2.1, "end of dectection zone")
+	listen := flag.String("listen", "127.0.0.1:2300", "host:port to start webserver")
+	// format := flag.String("format", "json", "format for the log files")
 	flag.Parse()
 
+	time.Sleep(time.Second * 1)
 	baseband := make(chan xethru.BaseBandAmpPhase)
 	resp := make(chan xethru.Respiration)
-	// time.Sleep(time.Second * 5)
-	go openXethru(*commPort, *baudrate, baseband, resp)
+	sleep := make(chan xethru.Sleep)
+	go openXethru(*commPort, *baudrate, *sensitivity, *start, *end, baseband, resp, sleep)
+
+	// initize maps of active websocket connections
 	baseBandconnections = make(map[*websocket.Conn]bool)
 	respirationconnections = make(map[*websocket.Conn]bool)
+	sleepconnections = make(map[*websocket.Conn]bool)
+
 	http.HandleFunc("/ws/bb", baseBandwsHandler)
-	http.HandleFunc("/ws/r", respirationwsHandler)
+	http.HandleFunc("/ws/resp", respirationwsHandler)
+	http.HandleFunc("/ws/sleep", sleepwsHandler)
 
 	http.Handle("/", http.FileServer(http.Dir("./www")))
-	// http.HandleFunc("/", indexHandler)
 	// http.HandleFunc("/js/reconnecting-websocket.min.js", websocketReconnectHandler)
+	// http.HandleFunc("/", indexHandler)
 
+	// start webserver in the background
 	go func() {
-		err := http.ListenAndServe("0.0.0.0:23000", nil)
+		err := http.ListenAndServe(*listen, nil)
 		if err != nil {
-			log.Println(err)
+			log.Panic(err)
 		}
 	}()
 
+	// open default browser
+	// open("http://" + *listen)
+
+	// Send all the websocket streams as soon as they arrive
 	for {
 		select {
 		case data := <-baseband:
@@ -71,30 +83,46 @@ func main() {
 			if err != nil {
 				log.Panicln("Error Marshaling: ", err)
 			}
-			sendBaseBand(b)
-			// go addtoamp(data)
-
+			go sendBaseBand(b)
 		case data := <-resp:
 			b, err := json.Marshal(data)
 			if err != nil {
 				log.Panicln("Error Marshaling: ", err)
 			}
-			sendrespiration(b)
+			go sendrespiration(b)
+		case data := <-sleep:
+			b, err := json.Marshal(data)
+			if err != nil {
+				log.Panicln("Error Marshaling: ", err)
+			}
+			go sendsleep(b)
 		}
 	}
 }
 
-var amp []float64
+// respirationfile, err := os.Create("./respiration.json")
+// if err != nil {
+// 	log.Panic(err)
+// }
+// defer respirationfile.Close()
+//
+// sleepfile, err := os.Create("./sleep.json")
+// if err != nil {
+// 	log.Panic(err)
+// }
+// defer sleepfile.Close()
+//
+// sleepenc := json.NewEncoder(sleepfile)
+// respirationenc := json.NewEncoder(respirationfile)
+// s = s.(xethru.Sleep)
+// if err := sleepenc.Encode(&s); err != nil {
+// 	log.Println(err)
+// }
+// if err := respirationenc.Encode(&s); err != nil {
+// 	log.Println(err)
+// }
 
-func addtoamp(a xethru.BaseBandAmpPhase) {
-	if len(amp) > 3120 {
-		amp = amp[1:]
-	}
-	amp = append(amp, a.Amplitude[1])
-	x := fft.FFTReal(amp)
-	log.Println(len(amp), x)
-}
-
+// open default browser with url
 func open(url string) error {
 	var cmd string
 	var args []string
@@ -112,153 +140,57 @@ func open(url string) error {
 	return exec.Command(cmd, args...).Start()
 }
 
-func indexHandler(w http.ResponseWriter, r *http.Request) {
-	file, _ := Asset("www/index.html")
-	w.Header().Set("Content-Type", "text/html")
-	w.Write(file)
-}
-func websocketReconnectHandler(w http.ResponseWriter, r *http.Request) {
-	file, _ := Asset("www/js/reconnecting-websocket.min.js")
-	w.Header().Set("Content-Type", "text/javascript")
-	w.Write(file)
-}
+func reset(comm string, baudrate uint) error {
+	c := &serial.Config{Name: comm, Baud: int(baudrate)}
 
-var respirationconnectionsMutex sync.Mutex
-var respirationconnections map[*websocket.Conn]bool
-
-func respirationwsHandler(w http.ResponseWriter, r *http.Request) {
-	// Taken from gorilla's website
-	conn, err := websocket.Upgrade(w, r, nil, 1024, 1024)
-	if _, ok := err.(websocket.HandshakeError); ok {
-		http.Error(w, "Not a websocket handshake", 400)
-		return
-	} else if err != nil {
-		log.Println(err)
-		return
-	}
-	log.Println("Succesfully upgraded connection")
-	respirationconnectionsMutex.Lock()
-	respirationconnections[conn] = true
-	respirationconnectionsMutex.Unlock()
-
-	for {
-		// Blocks until a message is read
-		_, msg, err := conn.ReadMessage()
-		if err != nil {
-			respirationconnectionsMutex.Lock()
-			// log.Printf("Disconnecting %v because %v\n", conn, err)
-			delete(respirationconnections, conn)
-			respirationconnectionsMutex.Unlock()
-			conn.Close()
-			return
-		}
-		log.Println(msg)
-	}
-}
-
-func sendrespiration(msg []byte) {
-	respirationconnectionsMutex.Lock()
-	for conn := range respirationconnections {
-		if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
-			delete(respirationconnections, conn)
-			conn.Close()
-		}
-	}
-	respirationconnectionsMutex.Unlock()
-}
-
-var baseBandconnectionsMutex sync.Mutex
-var baseBandconnections map[*websocket.Conn]bool
-
-func baseBandwsHandler(w http.ResponseWriter, r *http.Request) {
-	// Taken from gorilla's website
-	conn, err := websocket.Upgrade(w, r, nil, 1024, 1024)
-	if _, ok := err.(websocket.HandshakeError); ok {
-		http.Error(w, "Not a websocket handshake", 400)
-		return
-	} else if err != nil {
-		log.Println(err)
-		return
-	}
-	log.Println("Succesfully upgraded connection")
-	baseBandconnectionsMutex.Lock()
-	baseBandconnections[conn] = true
-	baseBandconnectionsMutex.Unlock()
-
-	for {
-		// Blocks until a message is read
-		_, msg, err := conn.ReadMessage()
-		if err != nil {
-			baseBandconnectionsMutex.Lock()
-			// log.Printf("Disconnecting %v because %v\n", conn, err)
-			delete(baseBandconnections, conn)
-			baseBandconnectionsMutex.Unlock()
-			conn.Close()
-			return
-		}
-		log.Println(msg)
-	}
-}
-
-func sendBaseBand(msg []byte) {
-	baseBandconnectionsMutex.Lock()
-	for conn := range baseBandconnections {
-		if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
-			delete(baseBandconnections, conn)
-			conn.Close()
-		}
-	}
-	baseBandconnectionsMutex.Unlock()
-}
-
-func openXethru(comm string, baudrate uint, baseband chan xethru.BaseBandAmpPhase, resp chan xethru.Respiration) {
-
-	time.Sleep(time.Millisecond * 2000)
-
-	options := serial.OpenOptions{
-		PortName:        comm,
-		BaudRate:        baudrate,
-		DataBits:        8,
-		StopBits:        1,
-		MinimumReadSize: 4,
-	}
-
-	port, err := serial.Open(options)
+	port, err := serial.OpenPort(c)
 	if err != nil {
 		log.Printf("serial.Open: %v\n", err)
 	}
+	port.Flush()
 
 	x2 := xethru.Open("x2m200", port)
+	// defer port.Close()
+	defer x2.Close()
 
 	reset, err := x2.Reset()
 	if err != nil {
 		log.Printf("serial.Reset: %v\n", err)
+		return err
 	}
-	log.Println(reset)
-	port.Close()
-	// time.Sleep(time.Millisecond * 5000)
+	if !reset {
+		log.Panic("Could not reset")
+	}
+	return nil
+}
 
-	count := 20
+func openXethru(comm string, baudrate uint, sensivity uint, start float64, end float64, baseband chan xethru.BaseBandAmpPhase, resp chan xethru.Respiration, sleep chan xethru.Sleep) {
+
+	err := reset(comm, baudrate)
+	if err != nil {
+		log.Panic(err)
+	}
+
+	count := 5
 	for {
 		select {
 		case <-time.After(time.Second):
 			count--
-			log.Println(count)
+			log.Println("Waiting for sensor " + strconv.Itoa(count))
 		}
-		if count == 0 {
+		if count <= 0 {
 			break
 		}
 	}
-	// time.Sleep(time.Millisecond * 20000)
 
-	port, err = serial.Open(options)
+	c := &serial.Config{Name: comm, Baud: int(baudrate)}
+	port, err := serial.OpenPort(c)
 	if err != nil {
 		log.Fatalf("serial.Open: %v", err)
 	}
-	time.Sleep(time.Second * 1)
 
-	defer port.Close()
-	x2 = xethru.Open("x2m200", port)
+	x2 := xethru.Open("x2m200", port)
+	defer x2.Close()
 
 	m := xethru.NewModule(x2, "sleep")
 
@@ -270,50 +202,41 @@ func openXethru(comm string, baudrate uint, baseband chan xethru.BaseBandAmpPhas
 
 	log.Println("Setting LED MODE")
 	m.LEDMode = xethru.LEDInhalation
-	m.SetLEDMode()
+	err = m.SetLEDMode()
+	if err != nil {
+		log.Panicln(err)
+	}
 
 	log.Println("SetDetectionZone")
-	m.SetDetectionZone(0.5, 2.1)
+	err = m.SetDetectionZone(start, end)
+	if err != nil {
+		log.Panicln(err)
+	}
 
 	log.Println("SetSensitivity")
-	m.SetSensitivity(7)
-	m.Enable("phase")
+	err = m.SetSensitivity(int(sensivity))
+	if err != nil {
+		log.Panicln(err)
+	}
+
+	err = m.Enable("phase")
+	if err != nil {
+		log.Panicln(err)
+	}
+
 	stream := make(chan interface{})
 	go m.Run(stream)
 
-	// open default browser
-	open("http://localhost:23000/")
-
-	respirationfile, err := os.Create("./respiration.json")
-	if err != nil {
-		log.Panic(err)
-	}
-	defer respirationfile.Close()
-
-	sleepfile, err := os.Create("./sleep.json")
-	if err != nil {
-		log.Panic(err)
-	}
-	defer sleepfile.Close()
-
-	sleepenc := json.NewEncoder(sleepfile)
-	respirationenc := json.NewEncoder(respirationfile)
 	for {
 		select {
 		case s := <-stream:
 			switch s.(type) {
 			case xethru.Respiration:
 				resp <- s.(xethru.Respiration)
-				if err := respirationenc.Encode(&s); err != nil {
-					log.Println(err)
-				}
 			case xethru.BaseBandAmpPhase:
 				baseband <- s.(xethru.BaseBandAmpPhase)
 			case xethru.Sleep:
-				s = s.(xethru.Sleep)
-				if err := sleepenc.Encode(&s); err != nil {
-					log.Println(err)
-				}
+				sleep <- s.(xethru.Sleep)
 			default:
 				log.Printf("%#v", s)
 			}
@@ -321,32 +244,3 @@ func openXethru(comm string, baudrate uint, baseband chan xethru.BaseBandAmpPhas
 		}
 	}
 }
-
-type kalman struct {
-	g  float64 // gain
-	em float64 // error in measument
-	ee float64 // error in estimate
-	e  float64 // estimate
-	le float64 // lastestimate
-}
-
-func (k *kalman) setMeasumentError(em float64) {
-	k.em = em
-}
-
-func (k *kalman) kalmanFilter(m float64) float64 {
-	k.g = k.ee / (k.ee + k.em)
-	k.e = k.le + k.g*(m-k.le)
-	k.ee = (1 - k.g) * k.ee
-	return k.e
-}
-
-//
-//
-//
-//
-//
-//
-//
-//
-//
