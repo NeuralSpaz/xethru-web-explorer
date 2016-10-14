@@ -7,10 +7,16 @@
 
 </head>
 <body>
-	<canvas id="amplitude_render"></canvas>
-	<canvas id="phase_render"></canvas>
-<script>
+	<input id="EnableClutterMapButton" type="button" value="Enable Clutter Map" onclick="EnableClutterMap();">
 
+	<canvas id="resp_render"></canvas>
+
+	<canvas id="amplitude_render"></canvas>
+
+	<canvas id="phase_render"></canvas>
+
+<script>
+	var clutterMapEnabled = false
 	var gradient = ["#0011FF", "#0F10F0", "#1E0FE1", "#2D0ED2", "#3C0DC3", "#4B0BB3", "#5A0AA4", "#690A96", "#780987", "#870878", "#960769", "#A50559", "#B4044A", "#C3043C", "#D2032D", "#E1021E", "#F0010F", "#FF0000", "#F00F05", "#E11E0A", "#D22D0F", "#C33C14", "#B34B19", "#A45A1E", "#966923", "#877828", "#78872D", "#699632", "#59A537", "#4AB43C", "#3CC341", "#2DD246", "#1EE14B", "#0FF050", "#00FF55", "#0FFD50", "#1EFB4B", "#2DF946", "#3CF741", "#4BF63B", "#5AF436", "#69F232", "#78F02D", "#87EF28", "#96ED23", "#A5EB1D", "#B4E918", "#C3E814", "#D2E60F", "#E1E40A", "#F0E205", "#FFE100"]
 
 	// Get canvas Context
@@ -19,6 +25,9 @@
 
 	phasecanvas = document.getElementById('phase_render');
 	phasectx = phasecanvas.getContext('2d');
+
+	respcanvas = document.getElementById('resp_render');
+	respctx = respcanvas.getContext('2d');
 
 	var NormaliseArray = [];
 	function Normalise() {
@@ -30,6 +39,18 @@
 	}
 	Normalise()
 
+	function EnableClutterMap() {
+		clutterMapEnabled ^= true
+	}
+
+	var ClutterMap = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+
+	function UpdateClutterMap(amplitude, weight) {
+		for (var i =0 ; i< amplitude.length; i++){
+			ClutterMap[i]= ClutterMap[i]*(1-weight) + (amplitude[i]*weight)
+		}
+	}
+
 	function renderAmp(data) {
 		ampctx.canvas.width  = window.innerWidth-50;
 		ampctx.canvas.height  = window.innerHeight/3;
@@ -38,7 +59,7 @@
 
 		for (var i = 0; i < bars; i++) {
 			// comment out next line if you dont want 1/4th power normalised amplitude
-			data[i]= -data[i]*NormaliseArray[i]*.02;
+			data[i]= (-data[i]*NormaliseArray[i])*.02;
 			bar_x = i * ampcanvas.width/bars;
 			bar_width = (ampcanvas.width/bars)-2;
 			bar_height = -data[i]*ampcanvas.height/50;
@@ -62,16 +83,41 @@
 		}
 	}
 
+	function renderRespiration(data) {
+		respctx.canvas.width  = window.innerWidth-50;
+		respctx.canvas.height  = window.innerHeight/20;
+		respctx.clearRect(0, 0, respcanvas.width, respcanvas.height);
+		respctx.fillStyle = '#FF5733'; // Color of the bars
+		bar_x = (respctx.canvas.width/2);
+		bar_y = 5
+		bar_width = -data.movement*50
+		bar_height = respctx.canvas.height -10
+		respctx.fillRect(bar_x, bar_y, bar_width, bar_height);
+		respctx.font = respctx.canvas.height/2 + "pt Arial";
+		respctx.textAlign = "center";
+		respctx.textBaseline = "middle";
+		respctx.fillStyle = 'black';
+		text = "state: " + data.state + " rpm: " + data.rpm + " distance: " + data.distance.toFixed(2);
+		respctx.fillText(text, respctx.canvas.width/2, respctx.canvas.height/2);
+	}
+
 	// This gets called every time we get new baseband data
 	function BaseBandFunc(baseband) {
 		// console.log(baseband)
+		if (clutterMapEnabled) {
+			UpdateClutterMap(baseband.amplitude, 0.05)
+			for (var i =0 ; i< baseband.amplitude.length; i++){
+				baseband.amplitude[i]= Math.abs(baseband.amplitude[i]-ClutterMap[i])
+				baseband.amplitude[i]*=5
+			}
+		}
 		renderAmp(baseband.amplitude)
 		renderPhase(baseband.phase)
 	}
 
 	// This gets called every time we get new respiration data
 	function RespirationFunc(respiration) {
-
+		renderRespiration(respiration)
 	}
 
 	// This gets called every time we get new sleep data

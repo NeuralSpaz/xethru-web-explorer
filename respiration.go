@@ -23,6 +23,7 @@ import (
 	"flag"
 	"log"
 	"net/http"
+	"os"
 	"os/exec"
 	"runtime"
 	"strconv"
@@ -42,7 +43,7 @@ func main() {
 	start := flag.Float64("start", 0.5, "start of dectection zone")
 	end := flag.Float64("end", 2.1, "end of dectection zone")
 	listen := flag.String("listen", "127.0.0.1:23000", "host:port to start webserver")
-	// format := flag.String("format", "json", "format for the log files")
+	// format := flag.String("format", "json", "format for the log files valid choices are csv and json")
 	flag.Parse()
 
 	time.Sleep(time.Second * 1)
@@ -74,8 +75,19 @@ func main() {
 
 	// open default browser
 	open("http://" + *listen)
+	date := time.Now().Format(time.RFC822)
+	respirationfile, err := os.Create("./resp " + date + ".json")
+	if err != nil {
+		log.Println(err)
+	}
+	respirationenc := json.NewEncoder(respirationfile)
 
-	// Send all the websocket streams as soon as they arrive
+	sleepfile, err := os.Create("./sleep " + date + ".json")
+	if err != nil {
+		log.Println(err)
+	}
+	sleepenc := json.NewEncoder(sleepfile)
+
 	for {
 		select {
 		case data := <-baseband:
@@ -90,37 +102,21 @@ func main() {
 				log.Panicln("Error Marshaling: ", err)
 			}
 			go sendrespiration(b)
+			if err := respirationenc.Encode(&data); err != nil {
+				log.Println(err)
+			}
 		case data := <-sleep:
 			b, err := json.Marshal(data)
 			if err != nil {
 				log.Panicln("Error Marshaling: ", err)
 			}
 			go sendsleep(b)
+			if err := sleepenc.Encode(&data); err != nil {
+				log.Println(err)
+			}
 		}
 	}
 }
-
-// respirationfile, err := os.Create("./respiration.json")
-// if err != nil {
-// 	log.Panic(err)
-// }
-// defer respirationfile.Close()
-//
-// sleepfile, err := os.Create("./sleep.json")
-// if err != nil {
-// 	log.Panic(err)
-// }
-// defer sleepfile.Close()
-//
-// sleepenc := json.NewEncoder(sleepfile)
-// respirationenc := json.NewEncoder(respirationfile)
-// s = s.(xethru.Sleep)
-// if err := sleepenc.Encode(&s); err != nil {
-// 	log.Println(err)
-// }
-// if err := respirationenc.Encode(&s); err != nil {
-// 	log.Println(err)
-// }
 
 // open default browser with url
 func open(url string) error {
