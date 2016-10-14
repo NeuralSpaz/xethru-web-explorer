@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io/ioutil"
 	"log"
 	"net/http"
 	"sync"
@@ -9,8 +10,12 @@ import (
 )
 
 func indexHandler(w http.ResponseWriter, r *http.Request) {
+	file, err := ioutil.ReadFile("index.html")
+	if err != nil {
+		file, _ = Asset("www/index.html")
+	}
 	// os.OpenFile("./index.html", flag, perm)
-	file, _ := Asset("www/index.html")
+	// file, _ := Asset("www/index.html")
 	w.Header().Set("Content-Type", "text/html")
 	w.Write(file)
 }
