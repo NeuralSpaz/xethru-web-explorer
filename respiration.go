@@ -30,7 +30,7 @@ import (
 
 	"github.com/NeuralSpaz/xethru"
 	"github.com/gorilla/websocket"
-	"github.com/tarm/serial"
+	"github.com/jacobsa/go-serial/serial"
 )
 
 func main() {
@@ -41,7 +41,7 @@ func main() {
 	sensitivity := flag.Uint("sensitivity", 7, "the sensitivity")
 	start := flag.Float64("start", 0.5, "start of dectection zone")
 	end := flag.Float64("end", 2.1, "end of dectection zone")
-	listen := flag.String("listen", "127.0.0.1:2300", "host:port to start webserver")
+	listen := flag.String("listen", "127.0.0.1:23000", "host:port to start webserver")
 	// format := flag.String("format", "json", "format for the log files")
 	flag.Parse()
 
@@ -60,9 +60,9 @@ func main() {
 	http.HandleFunc("/ws/resp", respirationwsHandler)
 	http.HandleFunc("/ws/sleep", sleepwsHandler)
 
-	http.Handle("/", http.FileServer(http.Dir("./www")))
-	// http.HandleFunc("/js/reconnecting-websocket.min.js", websocketReconnectHandler)
-	// http.HandleFunc("/", indexHandler)
+	// http.Handle("/", http.FileServer(http.Dir("./www")))
+	http.HandleFunc("/js/reconnecting-websocket.min.js", websocketReconnectHandler)
+	http.HandleFunc("/", indexHandler)
 
 	// start webserver in the background
 	go func() {
@@ -73,7 +73,7 @@ func main() {
 	}()
 
 	// open default browser
-	// open("http://" + *listen)
+	open("http://" + *listen)
 
 	// Send all the websocket streams as soon as they arrive
 	for {
@@ -141,13 +141,20 @@ func open(url string) error {
 }
 
 func reset(comm string, baudrate uint) error {
-	c := &serial.Config{Name: comm, Baud: int(baudrate)}
+	// c := &serial.Config{Name: comm, Baud: int(baudrate)}
+	options := serial.OpenOptions{
+		PortName:        comm,
+		BaudRate:        baudrate,
+		DataBits:        8,
+		StopBits:        1,
+		MinimumReadSize: 4,
+	}
 
-	port, err := serial.OpenPort(c)
+	port, err := serial.Open(options)
 	if err != nil {
 		log.Printf("serial.Open: %v\n", err)
 	}
-	port.Flush()
+	// port.Flush()
 
 	x2 := xethru.Open("x2m200", port)
 	// defer port.Close()
@@ -159,7 +166,7 @@ func reset(comm string, baudrate uint) error {
 		return err
 	}
 	if !reset {
-		log.Panic("Could not reset")
+		log.Fatal("Could not reset")
 	}
 	return nil
 }
@@ -183,8 +190,18 @@ func openXethru(comm string, baudrate uint, sensivity uint, start float64, end f
 		}
 	}
 
-	c := &serial.Config{Name: comm, Baud: int(baudrate)}
-	port, err := serial.OpenPort(c)
+	options := serial.OpenOptions{
+		PortName:        comm,
+		BaudRate:        baudrate,
+		DataBits:        8,
+		StopBits:        1,
+		MinimumReadSize: 4,
+	}
+
+	port, err := serial.Open(options)
+
+	// c := &serial.Config{Name: comm, Baud: int(baudrate)}
+	// port, err := serial.OpenPort(c)
 	if err != nil {
 		log.Fatalf("serial.Open: %v", err)
 	}

@@ -8,17 +8,17 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// func indexHandler(w http.ResponseWriter, r *http.Request) {
-// 	// os.OpenFile("./index.html", flag, perm)
-// 	file, _ := Asset("www/index.html")
-// 	w.Header().Set("Content-Type", "text/html")
-// 	w.Write(file)
-// }
-// func websocketReconnectHandler(w http.ResponseWriter, r *http.Request) {
-// 	file, _ := Asset("www/js/reconnecting-websocket.min.js")
-// 	w.Header().Set("Content-Type", "text/javascript")
-// 	w.Write(file)
-// }
+func indexHandler(w http.ResponseWriter, r *http.Request) {
+	// os.OpenFile("./index.html", flag, perm)
+	file, _ := Asset("www/index.html")
+	w.Header().Set("Content-Type", "text/html")
+	w.Write(file)
+}
+func websocketReconnectHandler(w http.ResponseWriter, r *http.Request) {
+	file, _ := Asset("www/js/reconnecting-websocket.min.js")
+	w.Header().Set("Content-Type", "text/javascript")
+	w.Write(file)
+}
 
 var respirationconnectionsMutex sync.Mutex
 var respirationconnections map[*websocket.Conn]bool
