@@ -34,23 +34,28 @@ import (
 	"github.com/jacobsa/go-serial/serial"
 )
 
+var resetflag bool
+
 func main() {
 	log.Println("X2M200 Web Demo")
 
 	commPort := flag.String("com", "/dev/ttyACM0", "the comm port you wish to use")
 	baudrate := flag.Uint("baud", 115200, "the baud rate for the comm port you wish to use")
 	sensitivity := flag.Uint("sensitivity", 7, "the sensitivity")
-	start := flag.Float64("start", 0.5, "start of dectection zone")
-	end := flag.Float64("end", 2.1, "end of dectection zone")
+	start := flag.Float64("start", 0.5, "start of detection zone")
+	end := flag.Float64("end", 2.1, "end of detection zone")
 	listen := flag.String("listen", "127.0.0.1:23000", "host:port to start webserver")
+	reset := flag.Bool("reset", false, "try to reset the sensor")
 	// format := flag.String("format", "json", "format for the log files valid choices are csv and json")
 	flag.Parse()
+	resetflag = *reset
 
 	time.Sleep(time.Second * 1)
 	baseband := make(chan xethru.BaseBandAmpPhase)
 	resp := make(chan xethru.Respiration)
 	sleep := make(chan xethru.Sleep)
-	go openXethru(*commPort, *baudrate, *sensitivity, *start, *end, baseband, resp, sleep)
+	url := "http://" + *listen
+	go openXethru(*commPort, *baudrate, *sensitivity, *start, *end, url, baseband, resp, sleep)
 
 	// initize maps of active websocket connections
 	baseBandconnections = make(map[*websocket.Conn]bool)
@@ -74,7 +79,7 @@ func main() {
 	}()
 
 	// open default browser
-	open("http://" + *listen)
+
 	date := time.Now().Format(time.RFC822)
 	respirationfile, err := os.Create("./resp " + date + ".json")
 	if err != nil {
@@ -136,7 +141,7 @@ func open(url string) error {
 	return exec.Command(cmd, args...).Start()
 }
 
-func reset(comm string, baudrate uint) error {
+func resetSensor(comm string, baudrate uint) error {
 	// c := &serial.Config{Name: comm, Baud: int(baudrate)}
 	options := serial.OpenOptions{
 		PortName:        comm,
@@ -167,11 +172,13 @@ func reset(comm string, baudrate uint) error {
 	return nil
 }
 
-func openXethru(comm string, baudrate uint, sensivity uint, start float64, end float64, baseband chan xethru.BaseBandAmpPhase, resp chan xethru.Respiration, sleep chan xethru.Sleep) {
+func openXethru(comm string, baudrate uint, sensivity uint, start float64, end float64, url string, baseband chan xethru.BaseBandAmpPhase, resp chan xethru.Respiration, sleep chan xethru.Sleep) {
 
-	err := reset(comm, baudrate)
-	if err != nil {
-		log.Panic(err)
+	if resetflag {
+		err := resetSensor(comm, baudrate)
+		if err != nil {
+			log.Panic(err)
+		}
 	}
 
 	count := 5
@@ -238,6 +245,10 @@ func openXethru(comm string, baudrate uint, sensivity uint, start float64, end f
 	}
 
 	stream := make(chan interface{})
+
+	log.Println("Opening browser to: ", url)
+	open(url)
+
 	go m.Run(stream)
 
 	for {

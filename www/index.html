@@ -47,6 +47,11 @@
 
 	function EnableClutterMap() {
 		clutterMapEnabled ^= true
+		if (!clutterMapEnabled) {
+			document.getElementById("EnableClutterMapButton").value = "Enable Clutter Map";
+		} else {
+			document.getElementById("EnableClutterMapButton").value = "Disable Clutter Map";
+		}
 	}
 
 	var ClutterMap = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
@@ -136,9 +141,9 @@
 
 	// This gets called every time we get new baseband data
 	function BaseBandFunc(baseband) {
+		UpdateClutterMap(baseband.amplitude, 0.05)
 		// console.log(baseband)
 		if (clutterMapEnabled) {
-			UpdateClutterMap(baseband.amplitude, 0.05)
 			for (var i =0 ; i< baseband.amplitude.length; i++){
 				baseband.amplitude[i]= Math.abs(baseband.amplitude[i]-ClutterMap[i])
 				baseband.amplitude[i]*=5
